@@ -74,4 +74,4 @@ def upload_file():
     return send_file(word_path, as_attachment=True, download_name=file.filename.replace('.pdf', '.docx'))
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5123, debug=True)

@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY flask-pdf-to-word-app/src/ .
 
 # Expose Flask port
-EXPOSE 5000
+EXPOSE 5123
 
 # Run the app
 CMD ["python", "app.py"]
