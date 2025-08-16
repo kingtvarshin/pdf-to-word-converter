@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF to Word Converter (Hindi)</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container">
+        <h1 class="mt-5">Upload PDF to Convert to Word</h1>
+        <form id="uploadForm" class="mt-4" method="post" action="/upload" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="pdfFile">Upload PDF File:</label>
+                <input type="file" class="form-control-file" id="pdfFile" name="pdfFile" accept=".pdf" required>
+            </div>
+            <div class="form-group">
+                <label for="lang">Select Document Language (for OCR):</label>
+                <select class="form-control" id="lang" name="lang">
+                    {% for name, code in langs %}
+                    <option value="{{ code }}">{{ name }} ({{ code }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <input type="hidden" id="fileId" name="fileId" value="">
+            <button type="submit" class="btn btn-primary">Convert & Download</button>
+        </form>
+        <div class="progress mt-3" style="height: 25px; display:none;" id="progressContainer">
+            <div class="progress-bar d-flex align-items-center justify-content-center"
+                 id="progressBar"
+                 role="progressbar"
+                 style="width: 100%; height: inherit; font-size: 1rem;">
+                Starting...
+            </div>
+        </div>
+    </div>
+    <script>
+        let fileId = null;
+
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            fileId = Math.random().toString(36).substring(2, 15); // Generate a random fileId
+            document.getElementById('fileId').value = fileId;
+            document.getElementById('progressContainer').style.display = 'block';
+            pollProgress();
+        });
+
+        function pollProgress() {
+            if (!fileId) return;
+            fetch('/progress/' + fileId)
+                .then(response => response.text())
+                .then(text => {
+                    document.getElementById('progressBar').textContent = text;
+                });
+            setTimeout(pollProgress, 1000);
+        }
+    </script>
+</body>
+</html>
