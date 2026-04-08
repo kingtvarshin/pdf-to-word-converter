@@ -35,6 +35,8 @@ services:
     ports:
       - "30017:8080"
       - "50000:50000"                   # Jenkins agent JNLP port
+    group_add:
+      - "${DOCKER_GID}"                 # Match host docker socket GID: run `stat -c '%g' /var/run/docker.sock`
     environment:
       # Set these here so they're available to all pipeline jobs
       TRUENAS_REGISTRY_HOST: "<TRUENAS_IP>:5050"
