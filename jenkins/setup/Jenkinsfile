@@ -1,0 +1,137 @@
+// ===========================================================================
+// Jenkins Setup Pipeline — Install / Upgrade Docker CLI
+//
+// Run this ONCE (or whenever you want to upgrade Docker CLI).
+// It downloads the Docker static binary into /var/jenkins_home/bin/ which
+// lives on the persistent volume — so Docker CLI survives container restarts
+// and image upgrades without needing to rebuild the Jenkins image.
+//
+// After this pipeline succeeds, every other pipeline on this Jenkins instance
+// will have Docker CLI available via /var/jenkins_home/bin/docker.
+//
+// To create this job in Jenkins:
+//   New Item → name: "setup-docker-cli" → Pipeline → OK
+//   Pipeline → Pipeline script from SCM → Git
+//   Repository URL: https://github.com/kingtvarshin/pdf-to-word-converter.git
+//   Script Path: jenkins/setup/Jenkinsfile
+//   Save → Build Now
+// ===========================================================================
+
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'DOCKER_VERSION',
+            defaultValue: '27.3.1',
+            description: 'Docker CLI version to install. Check https://download.docker.com/linux/static/stable/x86_64/ for available versions.'
+        )
+        booleanParam(
+            name: 'FORCE_REINSTALL',
+            defaultValue: false,
+            description: 'Force reinstall even if this version is already installed.'
+        )
+    }
+
+    environment {
+        INSTALL_DIR = '/var/jenkins_home/bin'
+        DOCKER_BIN  = '/var/jenkins_home/bin/docker'
+    }
+
+    stages {
+
+        // ---------------------------------------------------------------
+        stage('Check Existing Installation') {
+        // ---------------------------------------------------------------
+            steps {
+                script {
+                    def alreadyInstalled = sh(
+                        script: "${env.DOCKER_BIN} --version 2>/dev/null || echo 'NOT_FOUND'",
+                        returnStdout: true
+                    ).trim()
+
+                    if (alreadyInstalled != 'NOT_FOUND' && !params.FORCE_REINSTALL) {
+                        echo "Docker CLI already installed: ${alreadyInstalled}"
+                        echo "Set FORCE_REINSTALL=true to upgrade. Skipping install."
+                        env.SKIP_INSTALL = 'true'
+                    } else {
+                        echo "Will install Docker CLI v${params.DOCKER_VERSION}"
+                        env.SKIP_INSTALL = 'false'
+                    }
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
+        stage('Download & Install Docker CLI') {
+        // ---------------------------------------------------------------
+            when {
+                expression { env.SKIP_INSTALL == 'false' }
+            }
+            steps {
+                sh """
+                    set -e
+                    mkdir -p ${INSTALL_DIR}
+
+                    ARCHIVE="docker-${params.DOCKER_VERSION}.tgz"
+                    URL="https://download.docker.com/linux/static/stable/x86_64/\$ARCHIVE"
+
+                    echo "Downloading \$URL ..."
+                    curl -fsSL "\$URL" -o /tmp/\$ARCHIVE
+
+                    echo "Extracting docker binary..."
+                    tar -xzf /tmp/\$ARCHIVE -C /tmp docker/docker
+
+                    echo "Installing to ${INSTALL_DIR}/docker ..."
+                    mv /tmp/docker/docker ${DOCKER_BIN}
+                    chmod +x ${DOCKER_BIN}
+
+                    rm -rf /tmp/\$ARCHIVE /tmp/docker
+                    echo "Done."
+                """
+            }
+        }
+
+        // ---------------------------------------------------------------
+        stage('Verify') {
+        // ---------------------------------------------------------------
+            steps {
+                sh """
+                    echo "--- Docker CLI version ---"
+                    ${DOCKER_BIN} --version
+
+                    echo "--- Docker socket connectivity ---"
+                    ${DOCKER_BIN} info --format 'Docker host: {{.Name}}  Containers: {{.Containers}}'
+                """
+            }
+        }
+
+        // ---------------------------------------------------------------
+        stage('Print PATH Hint') {
+        // ---------------------------------------------------------------
+            steps {
+                echo """
+====================================================
+Docker CLI installed at: ${DOCKER_BIN}
+
+This path is already configured in the main
+Jenkinsfile via the PATH prepend in the environment
+block — no further action needed.
+
+To upgrade later: re-run this pipeline with a
+new DOCKER_VERSION value and FORCE_REINSTALL=true.
+====================================================
+"""
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Docker CLI v${params.DOCKER_VERSION} is ready at ${env.DOCKER_BIN}"
+        }
+        failure {
+            echo "Setup failed. Check the stage logs above."
+        }
+    }
+}

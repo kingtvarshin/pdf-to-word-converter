@@ -34,6 +34,9 @@ pipeline {
     environment {
         REPO_URL     = 'https://github.com/kingtvarshin/pdf-to-word-converter.git'
         IMAGE_NAME   = 'flask-pdf-to-word-app'
+        // Prepend the persistent Docker CLI location (installed by setup-docker-cli pipeline)
+        // This survives Jenkins container restarts since /var/jenkins_home is a volume.
+        PATH         = "/var/jenkins_home/bin:${env.PATH}"
         // REGISTRY_HOST is computed in the Validate Config stage by stripping
         // any http:// prefix and trailing slashes from TRUENAS_REGISTRY_HOST.
         // VERSIONED and LATEST are set dynamically in the Build stage.
