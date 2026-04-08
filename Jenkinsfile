@@ -14,7 +14,9 @@
 //   • truenas-registry-creds  — Username/Password for your TrueNAS registry
 //   • watchtower-api-token    — Secret Text: the WATCHTOWER_HTTP_API_TOKEN
 //                               value you set in registry-stack.yml
-//   • github-creds            — Username/Password (GitHub PAT)
+//   • github-creds            — Optional Username/Password (GitHub PAT)
+//                               Only needed if the repo becomes private or
+//                               your Jenkins instance cannot clone it anonymously.
 //
 // These default credential IDs are declared in the environment block below.
 // If you rename them in Jenkins, update the values there to match.
@@ -37,7 +39,7 @@ pipeline {
     environment {
         REPO_URL     = 'https://github.com/kingtvarshin/pdf-to-word-converter.git'
         IMAGE_NAME   = 'flask-pdf-to-word-app'
-        GITHUB_CREDS_ID = 'github-creds'
+        GITHUB_CREDS_ID = ''
         REGISTRY_CREDS_ID = 'truenas-registry-creds'
         WATCHTOWER_TOKEN_ID = 'watchtower-api-token'
         // Prepend the persistent Docker CLI location (installed by setup-docker-cli pipeline)
@@ -90,10 +92,13 @@ pipeline {
                     def missing = []
 
                     def requiredCredentials = [
-                        [id: env.GITHUB_CREDS_ID, type: 'usernamePassword'],
                         [id: env.REGISTRY_CREDS_ID, type: 'usernamePassword'],
                         [id: env.WATCHTOWER_TOKEN_ID, type: 'string']
                     ]
+
+                    if (env.GITHUB_CREDS_ID?.trim()) {
+                        requiredCredentials.add(0, [id: env.GITHUB_CREDS_ID, type: 'usernamePassword'])
+                    }
 
                     for (credential in requiredCredentials) {
                         try {
@@ -134,15 +139,18 @@ pipeline {
         stage('Checkout') {
         // ---------------------------------------------------------------
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/${params.BRANCH}"]],
-                    userRemoteConfigs: [[
-                        url: "${REPO_URL}",
-                        credentialsId: "${env.GITHUB_CREDS_ID}"
-                    ]]
-                ])
                 script {
+                    def remoteConfig = [url: env.REPO_URL]
+                    if (env.GITHUB_CREDS_ID?.trim()) {
+                        remoteConfig.credentialsId = env.GITHUB_CREDS_ID
+                    }
+
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "*/${params.BRANCH}"]],
+                        userRemoteConfigs: [remoteConfig]
+                    ])
+
                     env.GIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
                     echo "Building branch=${params.BRANCH}  commit=${env.GIT_SHORT}"
                 }
