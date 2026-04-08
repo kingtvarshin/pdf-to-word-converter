@@ -14,10 +14,10 @@ A Flask web application that converts PDF files into Word documents. It supports
 ## Planned Improvements
 
 ### Security Fixes
-- [ ] Sanitize uploaded filenames to prevent path traversal attacks (`secure_filename`)
-- [ ] Add server-side MIME type / magic-byte validation (not just HTML `accept=".pdf"`)
-- [ ] Enforce a maximum file upload size (`MAX_CONTENT_LENGTH`)
-- [ ] Disable `debug=True` in production; use environment-based config
+- [x] Sanitize uploaded filenames to prevent path traversal attacks (`secure_filename`)
+- [x] Add server-side MIME type / magic-byte validation (not just HTML `accept=".pdf"`)
+- [x] Enforce a maximum file upload size (`MAX_CONTENT_LENGTH`)
+- [x] Disable `debug=True` in production; use environment-based config
 
 ### Bug Fixes
 - [ ] Use UUID-based filenames to prevent collisions when multiple users upload files with the same name
@@ -25,7 +25,7 @@ A Flask web application that converts PDF files into Word documents. It supports
 - [ ] Stop the frontend progress-polling loop when status is `"Done!"` or an error occurs
 - [ ] Add route-level error handling to return user-friendly error messages instead of raw 500s
 - [ ] Fix stale page title in `index.html` (currently shows "Hindi" leftover)
-- [ ] Fix port inconsistency (`app.py` uses `5123`; Docker and README reference `5000`)
+- [x] Port set to `5123` intentionally (port 5000 is reserved by TrueNAS on the deployment host)
 
 ### New Features
 - [ ] Drag-and-drop upload zone for improved UX
@@ -104,7 +104,7 @@ pip install -r requirements.txt
    python src/app.py
    ```
 
-5. Open your browser at `http://127.0.0.1:5000`.
+5. Open your browser at `http://127.0.0.1:5123`.
 
 ## Docker Setup
 
@@ -117,12 +117,12 @@ pip install -r requirements.txt
 2. Run the container:
 
    ```bash
-   docker run -p 5000:5000 flask-pdf-to-word-app
+   docker run -p 5123:5123 flask-pdf-to-word-app
    ```
 
    Tesseract language packs and Poppler are installed automatically inside the container.
 
-3. Access the app at [http://localhost:5000](http://localhost:5000).
+3. Access the app at [http://localhost:5123](http://localhost:5123).
 
 ## Usage
 
