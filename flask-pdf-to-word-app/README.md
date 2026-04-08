@@ -20,11 +20,11 @@ A Flask web application that converts PDF files into Word documents. It supports
 - [x] Disable `debug=True` in production; use environment-based config
 
 ### Bug Fixes
-- [ ] Use UUID-based filenames to prevent collisions when multiple users upload files with the same name
-- [ ] Clean up `progress` dict entries after download to prevent memory leaks
-- [ ] Stop the frontend progress-polling loop when status is `"Done!"` or an error occurs
-- [ ] Add route-level error handling to return user-friendly error messages instead of raw 500s
-- [ ] Fix stale page title in `index.html` (currently shows "Hindi" leftover)
+- [x] Use UUID-based filenames to prevent collisions when multiple users upload files with the same name
+- [x] Clean up `progress` dict entries after download to prevent memory leaks
+- [x] Stop the frontend progress-polling loop when status is `"Done!"` or an error occurs
+- [x] Add route-level error handling to return user-friendly error messages instead of raw 500s
+- [x] Fix stale page title in `index.html` (currently shows "Hindi" leftover)
 - [x] Port set to `5123` intentionally (port 5000 is reserved by TrueNAS on the deployment host)
 
 ### New Features

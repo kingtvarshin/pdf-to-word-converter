@@ -95,10 +95,13 @@ def upload_file():
     try:
         pdf_to_word(pdf_path, word_path, lang, file_id, progress)
         progress[file_id] = 'Done!'
-        return send_file(word_path, as_attachment=True, download_name=safe_name.replace('.pdf', '.docx'))
+        response = send_file(word_path, as_attachment=True, download_name=safe_name.replace('.pdf', '.docx'))
+        return response
     except Exception as e:
         progress[file_id] = f'Error: {e}'
         return jsonify(error='Conversion failed. Please try again with a different file.'), 500
+    finally:
+        progress.pop(file_id, None)
 
 if __name__ == '__main__':
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
