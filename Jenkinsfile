@@ -1,23 +1,27 @@
 // ===========================================================================
 // Jenkins CI/CD Pipeline — Flask PDF to Word Converter
 //
-// Prerequisites on the Jenkins agent:
-//   • Docker must be available (mount /var/run/docker.sock into the Jenkins
-//     container when setting up the Custom App on TrueNAS).
+// Prerequisites:
+//   • Jenkins must use the custom image built from ./jenkins/Dockerfile
+//     (has Docker CLI pre-installed).
+//   • /var/run/docker.sock must be mounted into the Jenkins container
+//     (configured in deploy/registry-stack.yml).
+//   • TRUENAS_REGISTRY_HOST and WATCHTOWER_URL are injected as container
+//     environment variables in deploy/registry-stack.yml — no manual
+//     Global Properties step needed.
 //
 // Jenkins Credentials required (Manage Jenkins → Credentials):
 //   • truenas-registry-creds  — Username/Password for your TrueNAS registry
 //   • watchtower-api-token    — Secret Text: the WATCHTOWER_HTTP_API_TOKEN
 //                               value you set in registry-stack.yml
+//   • github-creds            — Username/Password (GitHub PAT)
 //
-// Configure once in Jenkins → Manage Jenkins → System → Global properties
-// (Environment variables):
-//   • TRUENAS_REGISTRY_HOST  e.g.  192.168.1.50:5050
-//   • WATCHTOWER_URL         e.g.  http://192.168.1.50:8080
+// Visual pipeline UI:
+//   Install the "Blue Ocean" plugin → open http://TRUENAS_IP:30017/blue
 // ===========================================================================
 
 pipeline {
-    agent any   // requires Docker on the agent — see note above
+    agent any
 
     parameters {
         choice(
@@ -30,7 +34,8 @@ pipeline {
     environment {
         REPO_URL     = 'https://github.com/kingtvarshin/pdf-to-word-converter.git'
         IMAGE_NAME   = 'flask-pdf-to-word-app'
-        // TRUENAS_REGISTRY_HOST and WATCHTOWER_URL come from Jenkins Global Properties
+        // TRUENAS_REGISTRY_HOST and WATCHTOWER_URL are injected by the
+        // Jenkins container in deploy/registry-stack.yml
         VERSIONED    = "${env.TRUENAS_REGISTRY_HOST}/${IMAGE_NAME}:${BUILD_NUMBER}"
         LATEST       = "${env.TRUENAS_REGISTRY_HOST}/${IMAGE_NAME}:latest"
     }
@@ -44,6 +49,27 @@ pipeline {
     stages {
 
         // ---------------------------------------------------------------
+        stage('Validate Config') {
+        // ---------------------------------------------------------------
+            steps {
+                script {
+                    if (!env.TRUENAS_REGISTRY_HOST || env.TRUENAS_REGISTRY_HOST == 'null') {
+                        error("TRUENAS_REGISTRY_HOST is not set. " +
+                              "Add it as an environment variable in the Jenkins " +
+                              "container definition in deploy/registry-stack.yml and redeploy Jenkins.")
+                    }
+                    if (!env.WATCHTOWER_URL || env.WATCHTOWER_URL == 'null') {
+                        error("WATCHTOWER_URL is not set. " +
+                              "Add it as an environment variable in the Jenkins " +
+                              "container definition in deploy/registry-stack.yml and redeploy Jenkins.")
+                    }
+                    echo "Registry : ${env.TRUENAS_REGISTRY_HOST}"
+                    echo "Watchtower: ${env.WATCHTOWER_URL}"
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
         stage('Checkout') {
         // ---------------------------------------------------------------
             steps {
@@ -51,8 +77,8 @@ pipeline {
                     $class: 'GitSCM',
                     branches: [[name: "*/${params.BRANCH}"]],
                     userRemoteConfigs: [[
-                        url: "${REPO_URL}"
-                        // credentialsId: 'github-creds'  // uncomment if repo goes private
+                        url: "${REPO_URL}",
+                        credentialsId: 'github-creds'
                     ]]
                 ])
                 script {

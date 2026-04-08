@@ -1,25 +1,47 @@
 # =============================================================================
-# TrueNAS Custom App stack — Private Docker Registry + Watchtower
+# TrueNAS Custom App stack — Jenkins + Private Docker Registry + Watchtower
 #
-# Deploy both services as a single Custom App on TrueNAS Scale:
+# Deploy as a single Custom App on TrueNAS Scale:
 #   TrueNAS UI → Apps → Custom App → paste this compose content
 #
 # One-time setup BEFORE first deploy:
 #   1. SSH into TrueNAS and create the auth file:
-#        mkdir -p /mnt/your-pool/registry/auth
+#        mkdir -p /mnt/<your-pool>/registry/auth
+#        mkdir -p /mnt/<your-pool>/registry/data
+#        mkdir -p /mnt/<your-pool>/jenkins-home
 #        docker run --rm \
 #            httpd:2 htpasswd -Bbn YOUR_USER YOUR_PASSWORD \
-#            > /mnt/your-pool/registry/auth/htpasswd
-#   2. Replace every placeholder below (marked with <...>) with real values.
-#   3. Make sure the Jenkins agent has /var/run/docker.sock mounted so it
-#      can run "docker build/push" commands.
-#   4. Add TRUENAS_IP:5050 to Docker's insecure-registries on any host that
-#      pushes to it (Jenkins agent):
-#        /etc/docker/daemon.json → { "insecure-registries": ["TRUENAS_IP:5050"] }
-#      Restart Docker after changing this.
+#            > /mnt/<your-pool>/registry/auth/htpasswd
+#   2. Replace every <placeholder> below with real values.
+#   3. Build the custom Jenkins image on TrueNAS ONCE before deploying:
+#        git clone https://github.com/kingtvarshin/pdf-to-word-converter.git
+#        cd pdf-to-word-converter
+#        docker build -t jenkins-with-docker ./jenkins/
+#   4. Add TRUENAS_IP:5050 to Docker's insecure-registries on TrueNAS:
+#        Edit /etc/docker/daemon.json → { "insecure-registries": ["TRUENAS_IP:5050"] }
+#        systemctl restart docker
 # =============================================================================
 
 services:
+
+  # ---------------------------------------------------------------------------
+  # Jenkins CI server — custom image with Docker CLI baked in
+  # UI: http://TRUENAS_IP:30017
+  # ---------------------------------------------------------------------------
+  jenkins:
+    image: jenkins-with-docker          # built from ./jenkins/Dockerfile
+    container_name: jenkins
+    restart: unless-stopped
+    ports:
+      - "30017:8080"
+      - "50000:50000"                   # Jenkins agent JNLP port
+    environment:
+      # Set these here so they're available to all pipeline jobs
+      TRUENAS_REGISTRY_HOST: "<TRUENAS_IP>:5050"
+      WATCHTOWER_URL: "http://<TRUENAS_IP>:8080"
+    volumes:
+      - /mnt/<your-pool>/jenkins-home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock   # Docker CLI talks to host daemon
 
   # ---------------------------------------------------------------------------
   # Private Docker Registry (listens on host port 5050)
