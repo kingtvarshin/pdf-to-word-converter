@@ -16,6 +16,9 @@
 //                               value you set in registry-stack.yml
 //   • github-creds            — Username/Password (GitHub PAT)
 //
+// These default credential IDs are declared in the environment block below.
+// If you rename them in Jenkins, update the values there to match.
+//
 // Visual pipeline UI:
 //   Install the "Blue Ocean" plugin → open http://TRUENAS_IP:30017/blue
 // ===========================================================================
@@ -34,6 +37,9 @@ pipeline {
     environment {
         REPO_URL     = 'https://github.com/kingtvarshin/pdf-to-word-converter.git'
         IMAGE_NAME   = 'flask-pdf-to-word-app'
+        GITHUB_CREDS_ID = 'github-creds'
+        REGISTRY_CREDS_ID = 'truenas-registry-creds'
+        WATCHTOWER_TOKEN_ID = 'watchtower-api-token'
         // Prepend the persistent Docker CLI location (installed by setup-docker-cli pipeline)
         // This survives Jenkins container restarts since /var/jenkins_home is a volume.
         PATH         = "/var/jenkins_home/bin:${env.PATH}"
@@ -77,6 +83,54 @@ pipeline {
         }
 
         // ---------------------------------------------------------------
+        stage('Validate Jenkins Credentials') {
+        // ---------------------------------------------------------------
+            steps {
+                script {
+                    def missing = []
+
+                    def requiredCredentials = [
+                        [id: env.GITHUB_CREDS_ID, type: 'usernamePassword'],
+                        [id: env.REGISTRY_CREDS_ID, type: 'usernamePassword'],
+                        [id: env.WATCHTOWER_TOKEN_ID, type: 'string']
+                    ]
+
+                    for (credential in requiredCredentials) {
+                        try {
+                            if (credential.type == 'usernamePassword') {
+                                withCredentials([usernamePassword(
+                                    credentialsId: credential.id,
+                                    usernameVariable: 'TEST_USER',
+                                    passwordVariable: 'TEST_PASS'
+                                )]) {
+                                    sh 'true'
+                                }
+                            } else {
+                                withCredentials([string(
+                                    credentialsId: credential.id,
+                                    variable: 'TEST_TOKEN'
+                                )]) {
+                                    sh 'true'
+                                }
+                            }
+                        } catch (Exception ignored) {
+                            missing << credential.id
+                        }
+                    }
+
+                    if (missing) {
+                        error(
+                            "Missing Jenkins credential(s): ${missing.join(', ')}. " +
+                            "Create them in Manage Jenkins -> Credentials, or update " +
+                            "GITHUB_CREDS_ID / REGISTRY_CREDS_ID / WATCHTOWER_TOKEN_ID in the Jenkinsfile " +
+                            "to match your existing IDs."
+                        )
+                    }
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
         stage('Checkout') {
         // ---------------------------------------------------------------
             steps {
@@ -85,7 +139,7 @@ pipeline {
                     branches: [[name: "*/${params.BRANCH}"]],
                     userRemoteConfigs: [[
                         url: "${REPO_URL}",
-                        credentialsId: 'github-creds'
+                        credentialsId: "${env.GITHUB_CREDS_ID}"
                     ]]
                 ])
                 script {
@@ -116,7 +170,7 @@ pipeline {
         // ---------------------------------------------------------------
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: 'truenas-registry-creds',
+                    credentialsId: env.REGISTRY_CREDS_ID,
                     usernameVariable: 'REG_USER',
                     passwordVariable: 'REG_PASS'
                 )]) {
@@ -139,7 +193,7 @@ pipeline {
         // ---------------------------------------------------------------
             steps {
                 withCredentials([string(
-                    credentialsId: 'watchtower-api-token',
+                    credentialsId: env.WATCHTOWER_TOKEN_ID,
                     variable: 'WT_TOKEN'
                 )]) {
                     sh """

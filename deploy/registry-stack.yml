@@ -17,7 +17,11 @@
 #        git clone https://github.com/kingtvarshin/pdf-to-word-converter.git
 #        cd pdf-to-word-converter
 #        docker build -t jenkins-with-docker ./jenkins/
-#   4. Add TRUENAS_IP:5050 to Docker's insecure-registries on TrueNAS:
+#   4. In Jenkins, create these credentials with the exact IDs used by the pipeline:
+#        - github-creds            (Username/Password, GitHub PAT)
+#        - truenas-registry-creds  (Username/Password, private registry login)
+#        - watchtower-api-token    (Secret Text, matches WATCHTOWER_HTTP_API_TOKEN below)
+#   5. Add TRUENAS_IP:5050 to Docker's insecure-registries on TrueNAS:
 #        Edit /etc/docker/daemon.json → { "insecure-registries": ["TRUENAS_IP:5050"] }
 #        systemctl restart docker
 # =============================================================================
