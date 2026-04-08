@@ -183,8 +183,26 @@ pipeline {
                     passwordVariable: 'REG_PASS'
                 )]) {
                     sh """
-                        echo "\$REG_PASS" | docker login ${env.REGISTRY_HOST} \\
-                            -u "\$REG_USER" --password-stdin
+                        set +e
+                        LOGIN_OUTPUT=\$(echo "\$REG_PASS" | docker login ${env.REGISTRY_HOST} \\
+                            -u "\$REG_USER" --password-stdin 2>&1)
+                        LOGIN_STATUS=\$?
+                        set -e
+
+                        echo "\$LOGIN_OUTPUT"
+
+                        if [ \$LOGIN_STATUS -ne 0 ]; then
+                            case "\$LOGIN_OUTPUT" in
+                                *"server gave HTTP response to HTTPS client"*)
+                                    echo "Registry ${env.REGISTRY_HOST} is serving HTTP, but the Docker daemon is attempting HTTPS." >&2
+                                    echo "Add the exact host:port '${env.REGISTRY_HOST}' to the Docker daemon insecure-registries list on the machine behind /var/run/docker.sock, then restart Docker." >&2
+                                    exit 1
+                                    ;;
+                            esac
+
+                            exit \$LOGIN_STATUS
+                        fi
+
                         docker push ${env.VERSIONED}
                         docker push ${env.LATEST}
                         docker logout ${env.REGISTRY_HOST}
