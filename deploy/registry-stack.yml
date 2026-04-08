@@ -1,86 +1,22 @@
 # =============================================================================
-# TrueNAS Custom App stack — Jenkins + Private Docker Registry + Watchtower
+# TrueNAS Custom App stack — Watchtower only
 #
-# Deploy as a single Custom App on TrueNAS Scale:
-#   TrueNAS UI → Apps → Custom App → paste this compose content
+# Use this when Jenkins, the private registry, and the app container already
+# exist separately.
 #
-# One-time setup BEFORE first deploy:
-#   1. SSH into TrueNAS and create the auth file:
-#        mkdir -p /mnt/<your-pool>/registry/auth
-#        mkdir -p /mnt/<your-pool>/registry/data
-#        mkdir -p /mnt/<your-pool>/jenkins-home
-#        docker run --rm \
-#            httpd:2 htpasswd -Bbn YOUR_USER YOUR_PASSWORD \
-#            > /mnt/<your-pool>/registry/auth/htpasswd
-#   2. Create a local .env file next to this stack file and set values like:
-#        REGISTRY_HOST=registry.example.local:5050
-#        WATCHTOWER_PUBLIC_URL=http://truenas.example.local:8080
-#        WATCHTOWER_HTTP_API_TOKEN=<strong-random-token>
-#        REGISTRY_USERNAME=<your-registry-user>
-#        REGISTRY_PASSWORD=<your-registry-password>
-#        JENKINS_HOME_PATH=/mnt/tank/jenkins-home
-#        REGISTRY_DATA_PATH=/mnt/tank/registry/data
-#        REGISTRY_AUTH_PATH=/mnt/tank/registry/auth
-#        DOCKER_GID=<gid-of-/var/run/docker.sock>
-#      Use a DNS name if you do not want to hardcode a TrueNAS IP.
-#   3. Build the custom Jenkins image on TrueNAS ONCE before deploying:
-#        git clone https://github.com/kingtvarshin/pdf-to-word-converter.git
-#        cd pdf-to-word-converter
-#        docker build -t jenkins-with-docker ./jenkins/
-#   4. In Jenkins, create these credentials with the exact IDs used by the pipeline:
-#        - github-creds            (Optional Username/Password, GitHub PAT)
-#                                  Leave GITHUB_CREDS_ID blank in Jenkinsfile for public repos.
-#        - truenas-registry-creds  (Username/Password, private registry login)
-#        - watchtower-api-token    (Secret Text, matches WATCHTOWER_HTTP_API_TOKEN below)
-#   5. Add your chosen registry host to Docker's insecure-registries on TrueNAS:
-#        Edit /etc/docker/daemon.json → { "insecure-registries": ["registry.example.local:5050"] }
-#        systemctl restart docker
-#   6. If you prefer Docker-managed named volumes instead of host paths, replace
-#      the bind mounts below with named volumes and initialize the auth file
-#      inside the registry auth volume separately.
+# Before deploy, provide these values in the TrueNAS app UI or a local .env file:
+#   WATCHTOWER_HTTP_API_TOKEN=<strong-random-token>
+#   REGISTRY_USERNAME=<your-registry-user>
+#   REGISTRY_PASSWORD=<your-registry-password>
+#
+# In Jenkins, set:
+#   WATCHTOWER_URL=http://<truenas-host>:38117
+#
+# And create this Jenkins Secret Text credential:
+#   watchtower-api-token = same value as WATCHTOWER_HTTP_API_TOKEN
 # =============================================================================
 
 services:
-
-  # ---------------------------------------------------------------------------
-  # Jenkins CI server — custom image with Docker CLI baked in
-  # UI: http://<jenkins-host>:30017
-  # ---------------------------------------------------------------------------
-  jenkins:
-    image: jenkins-with-docker          # built from ./jenkins/Dockerfile
-    container_name: jenkins
-    restart: unless-stopped
-    ports:
-      - "30017:8080"
-      - "50000:50000"                   # Jenkins agent JNLP port
-    group_add:
-      - "${DOCKER_GID}"                 # Match host docker socket GID: run `stat -c '%g' /var/run/docker.sock`
-    environment:
-      # Set these here so they're available to all pipeline jobs
-      TRUENAS_REGISTRY_HOST: "${REGISTRY_HOST}"
-      WATCHTOWER_URL: "${WATCHTOWER_PUBLIC_URL}"
-    volumes:
-      - ${JENKINS_HOME_PATH}:/var/jenkins_home
-      - /var/run/docker.sock:/var/run/docker.sock   # Docker CLI talks to host daemon
-
-  # ---------------------------------------------------------------------------
-  # Private Docker Registry (listens on host port 5050)
-  # Access: http://<registry-host>
-  # ---------------------------------------------------------------------------
-  registry:
-    image: registry:2
-    container_name: pdf-app-registry
-    restart: unless-stopped
-    ports:
-      - "5050:5000"
-    environment:
-      REGISTRY_AUTH: htpasswd
-      REGISTRY_AUTH_HTPASSWD_REALM: "TrueNAS Private Registry"
-      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
-      REGISTRY_STORAGE_DELETE_ENABLED: "true"
-    volumes:
-      - ${REGISTRY_DATA_PATH}:/var/lib/registry
-      - ${REGISTRY_AUTH_PATH}:/auth
 
   # ---------------------------------------------------------------------------
   # Watchtower — auto-pulls updated images and restarts the app container
@@ -96,7 +32,7 @@ services:
     container_name: watchtower
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "38117:8080"
     command: >
       --http-api-update
       --cleanup
@@ -116,13 +52,3 @@ services:
   # Watchtower monitors this container and restarts it when a new image is
   # pushed (image tag must stay "latest" for Watchtower to detect the change).
   # ---------------------------------------------------------------------------
-  pdf-app:
-    image: ${REGISTRY_HOST}/flask-pdf-to-word-app:latest
-    container_name: pdf-app
-    restart: unless-stopped
-    ports:
-      - "5123:5123"
-    environment:
-      FLASK_DEBUG: "false"
-      PORT: "5123"
-      MAX_UPLOAD_MB: "50"
