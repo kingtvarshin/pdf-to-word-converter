@@ -1,0 +1,86 @@
+# =============================================================================
+# TrueNAS Custom App stack — Private Docker Registry + Watchtower
+#
+# Deploy both services as a single Custom App on TrueNAS Scale:
+#   TrueNAS UI → Apps → Custom App → paste this compose content
+#
+# One-time setup BEFORE first deploy:
+#   1. SSH into TrueNAS and create the auth file:
+#        mkdir -p /mnt/your-pool/registry/auth
+#        docker run --rm \
+#            httpd:2 htpasswd -Bbn YOUR_USER YOUR_PASSWORD \
+#            > /mnt/your-pool/registry/auth/htpasswd
+#   2. Replace every placeholder below (marked with <...>) with real values.
+#   3. Make sure the Jenkins agent has /var/run/docker.sock mounted so it
+#      can run "docker build/push" commands.
+#   4. Add TRUENAS_IP:5050 to Docker's insecure-registries on any host that
+#      pushes to it (Jenkins agent):
+#        /etc/docker/daemon.json → { "insecure-registries": ["TRUENAS_IP:5050"] }
+#      Restart Docker after changing this.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Private Docker Registry (listens on host port 5050)
+  # Access: http://TRUENAS_IP:5050
+  # ---------------------------------------------------------------------------
+  registry:
+    image: registry:2
+    container_name: pdf-app-registry
+    restart: unless-stopped
+    ports:
+      - "5050:5000"
+    environment:
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: "TrueNAS Private Registry"
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - /mnt/<your-pool>/registry/data:/var/lib/registry
+      - /mnt/<your-pool>/registry/auth:/auth
+
+  # ---------------------------------------------------------------------------
+  # Watchtower — auto-pulls updated images and restarts the app container
+  #
+  # HTTP API endpoint: POST http://TRUENAS_IP:8080/v1/update
+  # Jenkins calls this at the end of every successful build.
+  #
+  # WATCHTOWER_HTTP_API_TOKEN must match the "watchtower-api-token" secret
+  # you create in Jenkins → Credentials.
+  # ---------------------------------------------------------------------------
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    command: >
+      --http-api-update
+      --cleanup
+      --include-restarting
+      --interval 3600
+      pdf-app
+    environment:
+      WATCHTOWER_HTTP_API_TOKEN: "<CHANGE-ME-STRONG-RANDOM-TOKEN>"
+      # Credentials for pulling from the private registry above
+      REPO_USER: "<YOUR_REGISTRY_USER>"
+      REPO_PASS: "<YOUR_REGISTRY_PASSWORD>"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # ---------------------------------------------------------------------------
+  # The Flask PDF-to-Word app itself
+  # Watchtower monitors this container and restarts it when a new image is
+  # pushed (image tag must stay "latest" for Watchtower to detect the change).
+  # ---------------------------------------------------------------------------
+  pdf-app:
+    image: <TRUENAS_IP>:5050/flask-pdf-to-word-app:latest
+    container_name: pdf-app
+    restart: unless-stopped
+    ports:
+      - "5123:5123"
+    environment:
+      FLASK_DEBUG: "false"
+      PORT: "5123"
+      MAX_UPLOAD_MB: "50"
