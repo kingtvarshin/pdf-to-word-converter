@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF to Word Converter (Hindi)</title>
+    <title>PDF to Word Converter</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
 </head>
 <body>
@@ -49,9 +49,19 @@
             fetch('/progress/' + fileId)
                 .then(response => response.text())
                 .then(text => {
-                    document.getElementById('progressBar').textContent = text;
+                    const bar = document.getElementById('progressBar');
+                    bar.textContent = text;
+                    if (text === 'Done!' || text.startsWith('Error:')) {
+                        if (text.startsWith('Error:')) {
+                            bar.classList.add('bg-danger');
+                        } else {
+                            bar.classList.add('bg-success');
+                        }
+                        fileId = null; // stop polling
+                        return;
+                    }
+                    setTimeout(pollProgress, 1000);
                 });
-            setTimeout(pollProgress, 1000);
         }
     </script>
 </body>
