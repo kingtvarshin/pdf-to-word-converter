@@ -161,6 +161,30 @@ pipeline {
         }
 
         // ---------------------------------------------------------------
+        stage('Fix Docker Socket') {
+        // ---------------------------------------------------------------
+        // SSHes into TrueNAS and ensures /var/run/docker.sock is readable
+        // by the Jenkins container. This is idempotent — safe to run on
+        // every build. Replaces the need to manually chmod after reboots.
+        // ---------------------------------------------------------------
+            steps {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: env.SSH_CREDS_ID,
+                    keyFileVariable: 'SSH_KEY_FILE',
+                    usernameVariable: 'SSH_USER_FROM_CRED'
+                )]) {
+                    sh """
+                        ssh -i "\$SSH_KEY_FILE" \
+                            -o StrictHostKeyChecking=no \
+                            -o BatchMode=yes \
+                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \
+                            'chmod 666 /var/run/docker.sock && echo "[fix-socket] /var/run/docker.sock permissions OK"'
+                    """
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
         stage('Checkout') {
         // ---------------------------------------------------------------
             steps {
