@@ -235,49 +235,12 @@ pipeline {
         }
 
         // ---------------------------------------------------------------
-        stage('Push to TrueNAS Registry') {
-        // ---------------------------------------------------------------
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: env.REGISTRY_CREDS_ID,
-                    usernameVariable: 'REG_USER',
-                    passwordVariable: 'REG_PASS'
-                )]) {
-                    sh """
-                        set +e
-                        LOGIN_OUTPUT=\$(echo "\$REG_PASS" | docker login ${env.REGISTRY_HOST} \\
-                            -u "\$REG_USER" --password-stdin 2>&1)
-                        LOGIN_STATUS=\$?
-                        set -e
-
-                        echo "\$LOGIN_OUTPUT"
-
-                        if [ \$LOGIN_STATUS -ne 0 ]; then
-                            case "\$LOGIN_OUTPUT" in
-                                *"server gave HTTP response to HTTPS client"*)
-                                    echo "Registry ${env.REGISTRY_HOST} is serving HTTP, but the Docker daemon is attempting HTTPS." >&2
-                                    echo "Add the exact host:port '${env.REGISTRY_HOST}' to the Docker daemon insecure-registries list on the machine behind /var/run/docker.sock, then restart Docker." >&2
-                                    exit 1
-                                    ;;
-                            esac
-
-                            exit \$LOGIN_STATUS
-                        fi
-
-                        docker push ${env.VERSIONED}
-                        docker push ${env.LATEST}
-                        docker logout ${env.REGISTRY_HOST}
-                    """
-                }
-            }
-        }
-
-        // ---------------------------------------------------------------
         stage('Configure TrueNAS Registry') {
         // ---------------------------------------------------------------
         // SSH into TrueNAS and idempotently ensure the private registry is
         // listed under insecure-registries in /etc/docker/daemon.json.
         // Restarts the Docker daemon only when a change is actually made.
+        // Must run before Push so docker login doesn't attempt HTTPS.
         // ---------------------------------------------------------------
             steps {
                 withCredentials([sshUserPrivateKey(
@@ -285,8 +248,6 @@ pipeline {
                     keyFileVariable: 'SSH_KEY_FILE',
                     usernameVariable: 'SSH_USER_FROM_CRED'
                 )]) {
-                    // Write the remote configuration script to a temp file,
-                    // then scp + execute it on TrueNAS.
                     writeFile file: 'configure-registry.sh', text: """#!/bin/sh
 set -e
 REGISTRY="${env.REGISTRY_HOST}"
@@ -324,6 +285,44 @@ fi
                             -o BatchMode=yes \\
                             "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
                             'chmod +x /tmp/jenkins-configure-registry.sh && /tmp/jenkins-configure-registry.sh'
+                    """
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
+        stage('Push to TrueNAS Registry') {
+        // ---------------------------------------------------------------
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: env.REGISTRY_CREDS_ID,
+                    usernameVariable: 'REG_USER',
+                    passwordVariable: 'REG_PASS'
+                )]) {
+                    sh """
+                        set +e
+                        LOGIN_OUTPUT=\$(echo "\$REG_PASS" | docker login ${env.REGISTRY_HOST} \\
+                            -u "\$REG_USER" --password-stdin 2>&1)
+                        LOGIN_STATUS=\$?
+                        set -e
+
+                        echo "\$LOGIN_OUTPUT"
+
+                        if [ \$LOGIN_STATUS -ne 0 ]; then
+                            case "\$LOGIN_OUTPUT" in
+                                *"server gave HTTP response to HTTPS client"*)
+                                    echo "Registry ${env.REGISTRY_HOST} is serving HTTP, but the Docker daemon is attempting HTTPS." >&2
+                                    echo "Add the exact host:port '${env.REGISTRY_HOST}' to the Docker daemon insecure-registries list on the machine behind /var/run/docker.sock, then restart Docker." >&2
+                                    exit 1
+                                    ;;
+                            esac
+
+                            exit \$LOGIN_STATUS
+                        fi
+
+                        docker push ${env.VERSIONED}
+                        docker push ${env.LATEST}
+                        docker logout ${env.REGISTRY_HOST}
                     """
                 }
             }
