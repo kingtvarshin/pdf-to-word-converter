@@ -17,6 +17,16 @@
 //   • github-creds            — Optional Username/Password (GitHub PAT)
 //                               Only needed if the repo becomes private or
 //                               your Jenkins instance cannot clone it anonymously.
+//   • truenas-ssh-creds       — SSH Username with private key for TrueNAS root access
+//                               Generate: ssh-keygen -t ed25519 -C "jenkins"
+//                               Then: Manage Jenkins → Credentials → Add → SSH Username with private key
+//                               Also copy the public key to TrueNAS:
+//                               ssh-copy-id -i ~/.ssh/id_ed25519.pub root@<TRUENAS_IP>
+//
+// Jenkins Global Properties (Manage Jenkins → System → Global properties):
+//   • TRUENAS_REGISTRY_HOST   — HOST:PORT of your private registry  e.g. 192.168.29.65:30095
+//   • WATCHTOWER_URL          — Full URL of Watchtower HTTP API      e.g. http://192.168.29.65:38117
+//   • TRUENAS_SSH_USER        — (Optional) SSH login user, defaults to 'root' if not set
 //
 // These default credential IDs are declared in the environment block below.
 // If you rename them in Jenkins, update the values there to match.
@@ -39,9 +49,10 @@ pipeline {
     environment {
         REPO_URL     = 'https://github.com/kingtvarshin/pdf-to-word-converter.git'
         IMAGE_NAME   = 'flask-pdf-to-word-app'
-        GITHUB_CREDS_ID = ''
-        REGISTRY_CREDS_ID = 'truenas-registry-creds'
+        GITHUB_CREDS_ID      = ''
+        REGISTRY_CREDS_ID   = 'truenas-registry-creds'
         WATCHTOWER_TOKEN_ID = 'watchtower-api-token'
+        SSH_CREDS_ID        = 'truenas-ssh-creds'
         // Prepend the persistent Docker CLI location (installed by setup-docker-cli pipeline)
         // This survives Jenkins container restarts since /var/jenkins_home is a volume.
         PATH         = "/var/jenkins_home/bin:${env.PATH}"
@@ -78,7 +89,12 @@ pipeline {
                         .replaceAll('/+$', '')
                     env.VERSIONED = "${env.REGISTRY_HOST}/${env.IMAGE_NAME}:${env.BUILD_NUMBER}"
                     env.LATEST    = "${env.REGISTRY_HOST}/${env.IMAGE_NAME}:latest"
-                    echo "Registry : ${env.REGISTRY_HOST}"
+                    // Derive TrueNAS SSH host from registry host (same machine, strip the port)
+                    env.TRUENAS_SSH_HOST = env.REGISTRY_HOST.split(':')[0]
+                    // Allow TRUENAS_SSH_USER to be overridden via Jenkins Global Properties
+                    env.SSH_LOGIN_USER   = env.TRUENAS_SSH_USER?.trim() ?: 'root'
+                    echo "Registry  : ${env.REGISTRY_HOST}"
+                    echo "SSH Host  : ${env.TRUENAS_SSH_HOST}  (user: ${env.SSH_LOGIN_USER})"
                     echo "Watchtower: ${env.WATCHTOWER_URL}"
                 }
             }
@@ -92,8 +108,9 @@ pipeline {
                     def missing = []
 
                     def requiredCredentials = [
-                        [id: env.REGISTRY_CREDS_ID, type: 'usernamePassword'],
-                        [id: env.WATCHTOWER_TOKEN_ID, type: 'string']
+                        [id: env.REGISTRY_CREDS_ID,   type: 'usernamePassword'],
+                        [id: env.WATCHTOWER_TOKEN_ID,  type: 'string'],
+                        [id: env.SSH_CREDS_ID,         type: 'sshKey']
                     ]
 
                     if (env.GITHUB_CREDS_ID?.trim()) {
@@ -107,6 +124,14 @@ pipeline {
                                     credentialsId: credential.id,
                                     usernameVariable: 'TEST_USER',
                                     passwordVariable: 'TEST_PASS'
+                                )]) {
+                                    sh 'true'
+                                }
+                            } else if (credential.type == 'sshKey') {
+                                withCredentials([sshUserPrivateKey(
+                                    credentialsId: credential.id,
+                                    keyFileVariable: 'TEST_KEY',
+                                    usernameVariable: 'TEST_SSH_USER'
                                 )]) {
                                     sh 'true'
                                 }
@@ -206,6 +231,63 @@ pipeline {
                         docker push ${env.VERSIONED}
                         docker push ${env.LATEST}
                         docker logout ${env.REGISTRY_HOST}
+                    """
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
+        stage('Configure TrueNAS Registry') {
+        // ---------------------------------------------------------------
+        // SSH into TrueNAS and idempotently ensure the private registry is
+        // listed under insecure-registries in /etc/docker/daemon.json.
+        // Restarts the Docker daemon only when a change is actually made.
+        // ---------------------------------------------------------------
+            steps {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: env.SSH_CREDS_ID,
+                    keyFileVariable: 'SSH_KEY_FILE',
+                    usernameVariable: 'SSH_USER_FROM_CRED'
+                )]) {
+                    // Write the remote configuration script to a temp file,
+                    // then scp + execute it on TrueNAS.
+                    writeFile file: 'configure-registry.sh', text: """#!/bin/sh
+set -e
+REGISTRY="${env.REGISTRY_HOST}"
+DAEMON_JSON=/etc/docker/daemon.json
+
+if [ ! -f "\$DAEMON_JSON" ]; then
+    printf '{\\n  "insecure-registries": ["%s"]\\n}\\n' "\$REGISTRY" > "\$DAEMON_JSON"
+    echo "[configure-registry] Created \$DAEMON_JSON — restarting Docker"
+    systemctl restart docker
+elif ! grep -qF "\$REGISTRY" "\$DAEMON_JSON"; then
+    python3 - "\$DAEMON_JSON" "\$REGISTRY" << 'PYEOF'
+import json, sys
+path, reg = sys.argv[1], sys.argv[2]
+with open(path) as f: cfg = json.load(f)
+ireg = cfg.setdefault('insecure-registries', [])
+if reg not in ireg:
+    ireg.append(reg)
+with open(path, 'w') as f: json.dump(cfg, f, indent=2)
+print(f'[configure-registry] Added {reg} to insecure-registries — restarting Docker')
+PYEOF
+    systemctl restart docker
+else
+    echo "[configure-registry] \$REGISTRY already in insecure-registries — no change needed"
+fi
+"""
+                    sh """
+                        scp -i "\$SSH_KEY_FILE" \\
+                            -o StrictHostKeyChecking=no \\
+                            -o BatchMode=yes \\
+                            configure-registry.sh \\
+                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}:/tmp/jenkins-configure-registry.sh"
+
+                        ssh -i "\$SSH_KEY_FILE" \\
+                            -o StrictHostKeyChecking=no \\
+                            -o BatchMode=yes \\
+                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
+                            'chmod +x /tmp/jenkins-configure-registry.sh && /tmp/jenkins-configure-registry.sh'
                     """
                 }
             }
