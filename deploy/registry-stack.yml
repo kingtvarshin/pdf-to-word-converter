@@ -37,8 +37,8 @@ services:
       --http-api-update
       --cleanup
       --include-restarting
+      --label-enable
       --interval 3600
-      pdf-app
     environment:
       WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_HTTP_API_TOKEN}"
       # Credentials for pulling from the private registry above
