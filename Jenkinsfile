@@ -163,23 +163,35 @@ pipeline {
         // ---------------------------------------------------------------
         stage('Fix Docker Socket') {
         // ---------------------------------------------------------------
-        // SSHes into TrueNAS and ensures /var/run/docker.sock is readable
-        // by the Jenkins container. This is idempotent — safe to run on
-        // every build. Replaces the need to manually chmod after reboots.
+        // Checks if /var/run/docker.sock is world-readable. If not (i.e.
+        // permission denied), SSHes into TrueNAS and fixes it. No-ops on
+        // every build where the socket is already accessible.
         // ---------------------------------------------------------------
             steps {
-                withCredentials([sshUserPrivateKey(
-                    credentialsId: env.SSH_CREDS_ID,
-                    keyFileVariable: 'SSH_KEY_FILE',
-                    usernameVariable: 'SSH_USER_FROM_CRED'
-                )]) {
-                    sh """
-                        ssh -i "\$SSH_KEY_FILE" \
-                            -o StrictHostKeyChecking=no \
-                            -o BatchMode=yes \
-                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \
-                            'chmod 666 /var/run/docker.sock && echo "[fix-socket] /var/run/docker.sock permissions OK"'
-                    """
+                script {
+                    def permissionDenied = sh(
+                        script: 'docker info > /dev/null 2>&1; echo $?',
+                        returnStdout: true
+                    ).trim() != '0'
+
+                    if (permissionDenied) {
+                        echo "[fix-socket] Docker socket not accessible — fixing permissions via SSH"
+                        withCredentials([sshUserPrivateKey(
+                            credentialsId: env.SSH_CREDS_ID,
+                            keyFileVariable: 'SSH_KEY_FILE',
+                            usernameVariable: 'SSH_USER_FROM_CRED'
+                        )]) {
+                            sh """
+                                ssh -i "\$SSH_KEY_FILE" \
+                                    -o StrictHostKeyChecking=no \
+                                    -o BatchMode=yes \
+                                    "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \
+                                    'chmod 666 /var/run/docker.sock && echo "[fix-socket] chmod applied OK"'
+                            """
+                        }
+                    } else {
+                        echo "[fix-socket] Docker socket is accessible — no action needed"
+                    }
                 }
             }
         }
