@@ -284,7 +284,7 @@ fi
                             -o StrictHostKeyChecking=no \\
                             -o BatchMode=yes \\
                             "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
-                            'chmod +x /tmp/jenkins-configure-registry.sh && /tmp/jenkins-configure-registry.sh'
+                            'sh /tmp/jenkins-configure-registry.sh'
                     """
                 }
             }
