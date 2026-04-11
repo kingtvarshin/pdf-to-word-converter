@@ -12,6 +12,7 @@ RUN apt-get update && \
         ca-certificates \
         curl \
         gnupg \
+        gosu \
         lsb-release && \
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/debian/gpg \
@@ -27,7 +28,17 @@ RUN apt-get update && \
 # Allow the jenkins user to talk to the Docker socket
 RUN groupadd -f docker && usermod -aG docker jenkins
 
-USER jenkins
+# Entrypoint script — dynamically matches the Docker socket GID at runtime
+# so the jenkins user can always access /var/run/docker.sock regardless of
+# what GID TrueNAS (or any other host) assigned to it.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Must run as root so the entrypoint can call groupmod/usermod,
+# then it uses gosu to drop back to the jenkins user.
+USER root
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Skip the Jenkins setup wizard on first boot
 ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
