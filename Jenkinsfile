@@ -251,29 +251,30 @@ pipeline {
                     writeFile file: 'configure-registry.sh', text: """#!/bin/sh
 set -e
 REGISTRY="${env.REGISTRY_HOST}"
-DAEMON_JSON=/etc/docker/daemon.json
 
-# Read existing config, fall back to empty object if missing or invalid JSON
-CURRENT=\$(python3 -c "
+# Pass registry as argument; heredoc delimiter quoted so shell does NOT expand
+# variables inside the Python block — avoids Groovy GString interpolation issues too.
+RESULT=\$(python3 - "\$REGISTRY" << 'PYEOF'
 import json, sys
+path = '/etc/docker/daemon.json'
+reg  = sys.argv[1]
 try:
-    with open('\\$DAEMON_JSON') as f:
-        cfg = json.load(f)
+    with open(path) as fh:
+        cfg = json.load(fh)
 except Exception:
     cfg = {}
 ireg = cfg.setdefault('insecure-registries', [])
-if '\\$REGISTRY' not in ireg:
-    ireg.append('\\$REGISTRY')
-    with open('\\$DAEMON_JSON', 'w') as f:
-        json.dump(cfg, f, indent=2)
+if reg not in ireg:
+    ireg.append(reg)
+    with open(path, 'w') as fh:
+        json.dump(cfg, fh, indent=2)
     print('changed')
 else:
     print('unchanged')
-" 2>&1)
+PYEOF
+)
 
-echo "[configure-registry] \$CURRENT"
-
-if [ "\$CURRENT" = "changed" ]; then
+if [ "\$RESULT" = "changed" ]; then
     echo "[configure-registry] Added \$REGISTRY to insecure-registries — restarting Docker"
     systemctl restart docker
     sleep 3
