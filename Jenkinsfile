@@ -235,6 +235,51 @@ pipeline {
         }
 
         // ---------------------------------------------------------------
+        stage('Configure Registry Credentials on TrueNAS') {
+        // ---------------------------------------------------------------
+        // Writes /root/.docker/config.json on TrueNAS with the registry
+        // auth token derived from truenas-registry-creds. This allows
+        // TrueNAS Custom Apps to pull private images without a manual
+        // docker login step. Idempotent — safe to run on every build.
+        // ---------------------------------------------------------------
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: env.REGISTRY_CREDS_ID,
+                        usernameVariable: 'REG_USER',
+                        passwordVariable: 'REG_PASS'
+                    ),
+                    sshUserPrivateKey(
+                        credentialsId: env.SSH_CREDS_ID,
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER_FROM_CRED'
+                    )
+                ]) {
+                    sh """
+                        AUTH_TOKEN=\$(echo -n "\$REG_USER:\$REG_PASS" | base64 | tr -d '\\n')
+                        REGISTRY="${env.REGISTRY_HOST}"
+
+                        ssh -i "\$SSH_KEY_FILE" \\
+                            -o StrictHostKeyChecking=no \\
+                            -o BatchMode=yes \\
+                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
+                            "mkdir -p /root/.docker && \\
+                             python3 -c \\"
+import json, os
+path = '/root/.docker/config.json'
+try:
+    with open(path) as fh: cfg = json.load(fh)
+except Exception: cfg = {}
+cfg.setdefault('auths', {})['\\$REGISTRY'] = {'auth': '\\$AUTH_TOKEN'}
+with open(path, 'w') as fh: json.dump(cfg, fh, indent=2)
+print('[registry-creds] Credentials written to ' + path)
+\\""
+                    """
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
         stage('Configure TrueNAS Registry') {
         // ---------------------------------------------------------------
         // SSH into TrueNAS and idempotently ensure the private registry is
