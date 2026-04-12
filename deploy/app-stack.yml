@@ -1,0 +1,48 @@
+# =============================================================================
+# TrueNAS Custom App — Flask PDF to Word Converter
+#
+# Deploy this as a Custom App on TrueNAS Scale:
+#   TrueNAS UI → Apps → Discover Apps → Custom App
+#   → Switch to YAML mode → paste this file
+#   → Application Name: flask-pdf-to-word
+#
+# Prerequisites:
+#   1. Allow the insecure private registry on TrueNAS (run once via SSH):
+#        cat > /etc/docker/daemon.json << 'EOF'
+#        { "insecure-registries": ["<TRUENAS_IP>:<REGISTRY_PORT>"] }
+#        EOF
+#        systemctl restart docker
+#
+#   2. Log in to the private registry from TrueNAS (run once via SSH):
+#        docker login <TRUENAS_IP>:<REGISTRY_PORT>
+#      Enter the registry username and password when prompted.
+#      Credentials are saved to /root/.docker/config.json and reused automatically.
+#
+#   3. The image must already exist in your private registry.
+#      Manual first-time push (SSH into TrueNAS):
+#        cd /tmp
+#        git clone https://github.com/kingtvarshin/pdf-to-word-converter.git
+#        cd pdf-to-word-converter
+#        docker build -t <TRUENAS_IP>:<REGISTRY_PORT>/flask-pdf-to-word-app:latest .
+#        docker push <TRUENAS_IP>:<REGISTRY_PORT>/flask-pdf-to-word-app:latest
+#
+#   3. Replace <your-pool> in the volumes section with your actual pool name.
+# =============================================================================
+
+services:
+
+  flask-pdf-to-word-app:
+    image: <TRUENAS_IP>:<REGISTRY_PORT>/flask-pdf-to-word-app:latest
+    restart: unless-stopped
+    ports:
+      - "5123:5123"
+    environment:
+      FLASK_DEBUG: "false"
+      PORT: "5123"
+      MAX_UPLOAD_MB: "50"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"   # tells Watchtower to monitor this container
+    volumes:
+      # Persist uploaded and converted files across container restarts
+      - /mnt/<YOUR_POOL>/pdf-app/uploads:/app/uploads
+      - /mnt/<YOUR_POOL>/pdf-app/outputs:/app/outputs
