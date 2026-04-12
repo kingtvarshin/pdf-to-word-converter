@@ -131,6 +131,14 @@ celerybeat.pid
 .env
 .venv
 env/
+
+# Registry auth — never commit htpasswd files
+deploy/auth/
+*.htpasswd
+
+# Uploaded/converted files generated at runtime
+flask-pdf-to-word-app/src/uploads/
+flask-pdf-to-word-app/src/outputs/
 venv/
 ENV/
 env.bak/

@@ -1,0 +1,54 @@
+# =============================================================================
+# TrueNAS Custom App stack — Watchtower only
+#
+# Use this when Jenkins, the private registry, and the app container already
+# exist separately.
+#
+# Before deploy, provide these values in the TrueNAS app UI or a local .env file:
+#   WATCHTOWER_HTTP_API_TOKEN=<strong-random-token>
+#   REGISTRY_USERNAME=<your-registry-user>
+#   REGISTRY_PASSWORD=<your-registry-password>
+#
+# In Jenkins, set:
+#   WATCHTOWER_URL=http://<truenas-host>:38117
+#
+# And create this Jenkins Secret Text credential:
+#   watchtower-api-token = same value as WATCHTOWER_HTTP_API_TOKEN
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Watchtower — auto-pulls updated images and restarts the app container
+  #
+  # HTTP API endpoint: POST ${WATCHTOWER_PUBLIC_URL}/v1/update
+  # Jenkins calls this at the end of every successful build.
+  #
+  # WATCHTOWER_HTTP_API_TOKEN must match the "watchtower-api-token" secret
+  # you create in Jenkins → Credentials.
+  # ---------------------------------------------------------------------------
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    ports:
+      - "38117:8080"
+    command: >
+      --http-api-update
+      --cleanup
+      --include-restarting
+      --label-enable
+      --interval 3600
+    environment:
+      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_HTTP_API_TOKEN}"
+      # Credentials for pulling from the private registry above
+      REPO_USER: "${REGISTRY_USERNAME}"
+      REPO_PASS: "${REGISTRY_PASSWORD}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # ---------------------------------------------------------------------------
+  # The Flask PDF-to-Word app itself
+  # Watchtower monitors this container and restarts it when a new image is
+  # pushed (image tag must stay "latest" for Watchtower to detect the change).
+  # ---------------------------------------------------------------------------
