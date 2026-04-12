@@ -253,24 +253,32 @@ set -e
 REGISTRY="${env.REGISTRY_HOST}"
 DAEMON_JSON=/etc/docker/daemon.json
 
-if [ ! -f "\$DAEMON_JSON" ]; then
-    printf '{\\n  "insecure-registries": ["%s"]\\n}\\n' "\$REGISTRY" > "\$DAEMON_JSON"
-    echo "[configure-registry] Created \$DAEMON_JSON — restarting Docker"
-    systemctl restart docker
-elif ! grep -qF "\$REGISTRY" "\$DAEMON_JSON"; then
-    python3 - "\$DAEMON_JSON" "\$REGISTRY" << 'PYEOF'
+# Read existing config, fall back to empty object if missing or invalid JSON
+CURRENT=\$(python3 -c "
 import json, sys
-path, reg = sys.argv[1], sys.argv[2]
-with open(path) as f: cfg = json.load(f)
+try:
+    with open('\\$DAEMON_JSON') as f:
+        cfg = json.load(f)
+except Exception:
+    cfg = {}
 ireg = cfg.setdefault('insecure-registries', [])
-if reg not in ireg:
-    ireg.append(reg)
-with open(path, 'w') as f: json.dump(cfg, f, indent=2)
-print(f'[configure-registry] Added {reg} to insecure-registries — restarting Docker')
-PYEOF
+if '\\$REGISTRY' not in ireg:
+    ireg.append('\\$REGISTRY')
+    with open('\\$DAEMON_JSON', 'w') as f:
+        json.dump(cfg, f, indent=2)
+    print('changed')
+else:
+    print('unchanged')
+" 2>&1)
+
+echo "[configure-registry] \$CURRENT"
+
+if [ "\$CURRENT" = "changed" ]; then
+    echo "[configure-registry] Added \$REGISTRY to insecure-registries — restarting Docker"
     systemctl restart docker
+    sleep 3
 else
-    echo "[configure-registry] \$REGISTRY already in insecure-registries — no change needed"
+    echo "[configure-registry] \$REGISTRY already configured — no restart needed"
 fi
 """
                     sh """
