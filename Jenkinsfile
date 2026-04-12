@@ -239,8 +239,13 @@ pipeline {
         // ---------------------------------------------------------------
         // SSH into TrueNAS and idempotently ensure the private registry is
         // listed under insecure-registries in /etc/docker/daemon.json.
-        // Restarts the Docker daemon only when a change is actually made.
-        // Must run before Push so docker login doesn't attempt HTTPS.
+        //
+        // NEVER restarts Docker automatically — a Docker restart on TrueNAS
+        // disrupts all running containers. Instead:
+        //   • If the registry is already configured  → no-op, pipeline continues.
+        //   • If daemon.json was just updated        → pipeline fails with
+        //     instructions to restart Docker manually ONCE, then re-run.
+        //     After that one manual restart every future build is a no-op.
         // ---------------------------------------------------------------
             steps {
                 withCredentials([sshUserPrivateKey(
@@ -252,8 +257,6 @@ pipeline {
 set -e
 REGISTRY="${env.REGISTRY_HOST}"
 
-# Pass registry as argument; heredoc delimiter quoted so shell does NOT expand
-# variables inside the Python block — avoids Groovy GString interpolation issues too.
 RESULT=\$(python3 - "\$REGISTRY" << 'PYEOF'
 import json, sys
 path = '/etc/docker/daemon.json'
@@ -275,26 +278,50 @@ PYEOF
 )
 
 if [ "\$RESULT" = "changed" ]; then
-    echo "[configure-registry] Added \$REGISTRY to insecure-registries — restarting Docker"
-    systemctl restart docker
-    sleep 3
+    echo "RESTART_REQUIRED"
 else
-    echo "[configure-registry] \$REGISTRY already configured — no restart needed"
+    echo "NO_ACTION"
 fi
 """
-                    sh """
-                        scp -i "\$SSH_KEY_FILE" \\
-                            -o StrictHostKeyChecking=no \\
-                            -o BatchMode=yes \\
-                            configure-registry.sh \\
-                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}:/tmp/jenkins-configure-registry.sh"
+                    script {
+                        def remoteResult = sh(
+                            script: """
+                                scp -i "\$SSH_KEY_FILE" \\
+                                    -o StrictHostKeyChecking=no \\
+                                    -o BatchMode=yes \\
+                                    configure-registry.sh \\
+                                    "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}:/tmp/jenkins-configure-registry.sh"
 
-                        ssh -i "\$SSH_KEY_FILE" \\
-                            -o StrictHostKeyChecking=no \\
-                            -o BatchMode=yes \\
-                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
-                            'sh /tmp/jenkins-configure-registry.sh'
-                    """
+                                ssh -i "\$SSH_KEY_FILE" \\
+                                    -o StrictHostKeyChecking=no \\
+                                    -o BatchMode=yes \\
+                                    "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
+                                    'sh /tmp/jenkins-configure-registry.sh'
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        if (remoteResult.contains('RESTART_REQUIRED')) {
+                            error("""
+=======================================================================
+  ONE-TIME MANUAL ACTION REQUIRED
+=======================================================================
+  The registry '${env.REGISTRY_HOST}' was added to
+  /etc/docker/daemon.json on TrueNAS, but Docker needs a restart
+  to pick up the change.
+
+  Please SSH into TrueNAS and run at a convenient time:
+
+      systemctl restart docker
+
+  Then re-run this pipeline — it will succeed from here on without
+  any further restarts.
+=======================================================================
+""")
+                        } else {
+                            echo "[configure-registry] ${env.REGISTRY_HOST} already in insecure-registries — no action needed"
+                        }
+                    }
                 }
             }
         }
