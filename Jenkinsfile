@@ -255,26 +255,50 @@ pipeline {
                         usernameVariable: 'SSH_USER_FROM_CRED'
                     )
                 ]) {
-                    sh """
-                        AUTH_TOKEN=\$(echo -n "\$REG_USER:\$REG_PASS" | base64 | tr -d '\\n')
-                        REGISTRY="${env.REGISTRY_HOST}"
+                    // Compute the base64 auth token on the Jenkins side,
+                    // embed it into a scp'd script so nothing sensitive
+                    // appears in the SSH command line or process list.
+                    script {
+                        def authToken = sh(
+                            script: 'printf "%s:%s" "$REG_USER" "$REG_PASS" | base64 | tr -d "\\n"',
+                            returnStdout: true
+                        ).trim()
 
-                        ssh -i "\$SSH_KEY_FILE" \\
-                            -o StrictHostKeyChecking=no \\
-                            -o BatchMode=yes \\
-                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
-                            "mkdir -p /root/.docker && \\
-                             python3 -c \\"
-import json, os
+                        writeFile file: 'setup-docker-creds.sh', text: """#!/bin/sh
+set -e
+REGISTRY="${env.REGISTRY_HOST}"
+TOKEN="${authToken}"
+
+python3 - "\$REGISTRY" "\$TOKEN" << 'PYEOF'
+import json, sys, os
 path = '/root/.docker/config.json'
+registry, token = sys.argv[1], sys.argv[2]
 try:
-    with open(path) as fh: cfg = json.load(fh)
-except Exception: cfg = {}
-cfg.setdefault('auths', {})['\\$REGISTRY'] = {'auth': '\\$AUTH_TOKEN'}
-with open(path, 'w') as fh: json.dump(cfg, fh, indent=2)
+    with open(path) as fh:
+        cfg = json.load(fh)
+except Exception:
+    cfg = {}
+cfg.setdefault('auths', {})[registry] = {'auth': token}
+with open(path, 'w') as fh:
+    json.dump(cfg, fh, indent=2)
+os.chmod(path, 0o600)
 print('[registry-creds] Credentials written to ' + path)
-\\""
-                    """
+PYEOF
+"""
+                        sh """
+                            scp -i "\$SSH_KEY_FILE" \\
+                                -o StrictHostKeyChecking=no \\
+                                -o BatchMode=yes \\
+                                setup-docker-creds.sh \\
+                                "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}:/tmp/jenkins-setup-docker-creds.sh"
+
+                            ssh -i "\$SSH_KEY_FILE" \\
+                                -o StrictHostKeyChecking=no \\
+                                -o BatchMode=yes \\
+                                "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
+                                'sh /tmp/jenkins-setup-docker-creds.sh && rm -f /tmp/jenkins-setup-docker-creds.sh'
+                        """
+                    }
                 }
             }
         }
