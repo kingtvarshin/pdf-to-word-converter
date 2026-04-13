@@ -49,7 +49,7 @@ pipeline {
     parameters {
         choice(
             name: 'BRANCH',
-            choices: ['main', 'develop', 'feature/security_fixes','feature/jenkins_integration'],
+            choices: ['main', 'develop', 'feature/security_fixes','feature/jenkins_integration','feature/app_enhancements'],
             description: 'Git branch to build and deploy'
         )
     }
