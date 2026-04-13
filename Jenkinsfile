@@ -186,10 +186,13 @@ pipeline {
         // ---------------------------------------------------------------
             steps {
                 script {
+                    // returnStatus:true returns the exit code as an integer without
+                    // throwing — unlike returnStdout with `; echo $?` which breaks
+                    // under Jenkins' default `set -e` when docker info fails.
                     def permissionDenied = sh(
-                        script: 'docker info > /dev/null 2>&1; echo $?',
-                        returnStdout: true
-                    ).trim() != '0'
+                        script: 'docker info > /dev/null 2>&1',
+                        returnStatus: true
+                    ) != 0
 
                     if (permissionDenied) {
                         echo "[fix-socket] Docker socket not accessible — fixing permissions via SSH"
@@ -527,8 +530,41 @@ fi
 
     post {
         always {
-            // Remove local images to keep the Jenkins agent disk clean
-            sh "docker rmi ${env.VERSIONED} ${env.LATEST} || true"
+            script {
+                // VERSIONED/LATEST are only set if Validate Config succeeded.
+                // Skip cleanup entirely if we never got that far.
+                if (!env.VERSIONED || !env.LATEST) {
+                    echo '[cleanup] Build vars not set — skipping image cleanup.'
+                    return
+                }
+
+                // Re-apply the Docker socket fix here too — `post` runs after all
+                // stages, and the fix may not have been reached (e.g. if Fix Docker
+                // Socket itself failed because of this same bug).
+                def socketOk = sh(script: 'docker info > /dev/null 2>&1', returnStatus: true) == 0
+                if (!socketOk) {
+                    try {
+                        withCredentials([sshUserPrivateKey(
+                            credentialsId: env.SSH_CREDS_ID,
+                            keyFileVariable: 'SSH_KEY_FILE',
+                            usernameVariable: 'SSH_USER_FROM_CRED'
+                        )]) {
+                            sh """
+                                ssh -i "\$SSH_KEY_FILE" \
+                                    -o StrictHostKeyChecking=no \
+                                    -o BatchMode=yes \
+                                    "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \
+                                    'chmod 666 /var/run/docker.sock'
+                            """
+                        }
+                    } catch (Exception ignored) {
+                        echo '[cleanup] Could not fix Docker socket — skipping image cleanup.'
+                        return
+                    }
+                }
+
+                sh "docker rmi ${env.VERSIONED} ${env.LATEST} || true"
+            }
         }
         success {
             echo "Deployed build #${BUILD_NUMBER} (${env.GIT_SHORT}) from branch '${params.BRANCH}' to TrueNAS."
