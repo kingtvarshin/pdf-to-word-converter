@@ -27,6 +27,33 @@
 #        docker push <TRUENAS_IP>:<REGISTRY_PORT>/flask-pdf-to-word-app:latest
 #
 #   3. Replace <your-pool> in the volumes section with your actual pool name.
+#
+#   4. Secret configuration (.env) — NEVER commit secrets to git.
+#      The Jenkins pipeline writes the production .env file to:
+#        /mnt/<YOUR_POOL>/pdf-app/.env
+#      on TrueNAS using the 'app-env-file' Secret File credential.
+#      That file is then loaded by Docker Compose's env_file directive below.
+#
+#      Required .env keys (see flask-pdf-to-word-app/.env.example):
+#        SECRET_KEY=<long-random-string>   # Flask session signing key
+#        FLASK_DEBUG=false
+#        PORT=5123
+#        MAX_UPLOAD_MB=50
+#        UPLOAD_FOLDER=uploads
+#        OUTPUT_FOLDER=outputs
+#
+#      First-time setup (manual, run once):
+#        ssh root@<TRUENAS_IP>
+#        mkdir -p /mnt/<YOUR_POOL>/pdf-app
+#        cat > /mnt/<YOUR_POOL>/pdf-app/.env << 'EOF'
+#        SECRET_KEY=<generate with: python3 -c "import secrets; print(secrets.token_hex(32))">
+#        FLASK_DEBUG=false
+#        PORT=5123
+#        MAX_UPLOAD_MB=50
+#        UPLOAD_FOLDER=uploads
+#        OUTPUT_FOLDER=outputs
+#        EOF
+#        chmod 600 /mnt/<YOUR_POOL>/pdf-app/.env
 # =============================================================================
 
 services:
@@ -36,7 +63,13 @@ services:
     restart: unless-stopped
     ports:
       - "5123:5123"
+    # Load secrets and config from a file that lives on the host (not in git).
+    # Jenkins writes this file to TrueNAS on every deploy via the app-env-file
+    # Secret File credential. Values here override any matching keys in env_file.
+    env_file:
+      - /mnt/<YOUR_POOL>/pdf-app/.env
     environment:
+      # Non-secret overrides — safe to commit.
       FLASK_DEBUG: "false"
       PORT: "5123"
       MAX_UPLOAD_MB: "50"

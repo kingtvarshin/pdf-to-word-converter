@@ -5,3 +5,5 @@ python-docx
 Werkzeug
 Pillow
 pdf2docx
+python-dotenv
+PyMuPDF

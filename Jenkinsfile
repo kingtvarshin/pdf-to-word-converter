@@ -22,6 +22,14 @@
 //                               Then: Manage Jenkins → Credentials → Add → SSH Username with private key
 //                               Also copy the public key to TrueNAS:
 //                               ssh-copy-id -i ~/.ssh/id_ed25519.pub root@<TRUENAS_IP>
+//   • app-env-file            — Secret File: the production .env for the Flask app.
+//                               Manage Jenkins → Credentials → (global) → Add Credentials
+//                                 Kind: Secret file
+//                                 ID:   app-env-file
+//                               Upload the .env file (copy from .env.example, fill real values).
+//                               Contents are written to /mnt/<pool>/pdf-app/.env on TrueNAS
+//                               and loaded by Docker Compose's env_file directive.
+//                               NEVER put this file in git — it contains SECRET_KEY.
 //
 // Jenkins Global Properties (Manage Jenkins → System → Global properties):
 //   • TRUENAS_REGISTRY_HOST   — HOST:PORT of your private registry  e.g. 192.168.29.65:30095
@@ -53,6 +61,7 @@ pipeline {
         REGISTRY_CREDS_ID   = 'truenas-registry-creds'
         WATCHTOWER_TOKEN_ID = 'watchtower-api-token'
         SSH_CREDS_ID        = 'truenas-ssh-creds'
+        ENV_FILE_CREDS_ID   = 'app-env-file'
         // Prepend the persistent Docker CLI location (installed by setup-docker-cli pipeline)
         // This survives Jenkins container restarts since /var/jenkins_home is a volume.
         PATH         = "/var/jenkins_home/bin:${env.PATH}"
@@ -110,7 +119,8 @@ pipeline {
                     def requiredCredentials = [
                         [id: env.REGISTRY_CREDS_ID,   type: 'usernamePassword'],
                         [id: env.WATCHTOWER_TOKEN_ID,  type: 'string'],
-                        [id: env.SSH_CREDS_ID,         type: 'sshKey']
+                        [id: env.SSH_CREDS_ID,         type: 'sshKey'],
+                        [id: env.ENV_FILE_CREDS_ID,    type: 'file']
                     ]
 
                     if (env.GITHUB_CREDS_ID?.trim()) {
@@ -132,6 +142,13 @@ pipeline {
                                     credentialsId: credential.id,
                                     keyFileVariable: 'TEST_KEY',
                                     usernameVariable: 'TEST_SSH_USER'
+                                )]) {
+                                    sh 'true'
+                                }
+                            } else if (credential.type == 'file') {
+                                withCredentials([file(
+                                    credentialsId: credential.id,
+                                    variable: 'TEST_FILE'
                                 )]) {
                                     sh 'true'
                                 }
@@ -391,6 +408,59 @@ fi
                             echo "[configure-registry] ${env.REGISTRY_HOST} already in insecure-registries — no action needed"
                         }
                     }
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
+        stage('Sync App Config') {
+        // ---------------------------------------------------------------
+        // Writes the production .env file to TrueNAS so the Docker
+        // container can load secrets (SECRET_KEY, etc.) via Docker
+        // Compose's env_file directive.
+        //
+        // Source: the 'app-env-file' Secret File credential in Jenkins.
+        //         (Manage Jenkins → Credentials → Secret file, ID: app-env-file)
+        // Destination: /mnt/<pool>/pdf-app/.env on TrueNAS  (chmod 600)
+        //
+        // This is idempotent — it overwrites the file on every deploy,
+        // so rotating a secret is as simple as updating the Jenkins
+        // credential and re-running the pipeline.
+        // ---------------------------------------------------------------
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: env.ENV_FILE_CREDS_ID,
+                        variable: 'APP_ENV_FILE'
+                    ),
+                    sshUserPrivateKey(
+                        credentialsId: env.SSH_CREDS_ID,
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER_FROM_CRED'
+                    )
+                ]) {
+                    sh """
+                        # Ensure the target directory exists on TrueNAS
+                        ssh -i "\$SSH_KEY_FILE" \\
+                            -o StrictHostKeyChecking=no \\
+                            -o BatchMode=yes \\
+                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
+                            'mkdir -p /mnt/<YOUR_POOL>/pdf-app'
+
+                        # Copy the .env file from Jenkins to TrueNAS
+                        scp -i "\$SSH_KEY_FILE" \\
+                            -o StrictHostKeyChecking=no \\
+                            -o BatchMode=yes \\
+                            "\$APP_ENV_FILE" \\
+                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}:/mnt/<YOUR_POOL>/pdf-app/.env"
+
+                        # Lock down permissions — this file contains secrets
+                        ssh -i "\$SSH_KEY_FILE" \\
+                            -o StrictHostKeyChecking=no \\
+                            -o BatchMode=yes \\
+                            "\$SSH_USER_FROM_CRED@${env.TRUENAS_SSH_HOST}" \\
+                            'chmod 600 /mnt/<YOUR_POOL>/pdf-app/.env && echo "[sync-config] .env deployed OK"'
+                    """
                 }
             }
         }

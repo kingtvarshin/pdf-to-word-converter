@@ -28,16 +28,16 @@ A Flask web application that converts PDF files into Word documents. It supports
 - [x] Port set to `5123` intentionally (port 5000 is reserved by TrueNAS on the deployment host)
 
 ### New Features
-- [ ] Drag-and-drop upload zone for improved UX
-- [ ] Page range selection (convert only selected pages)
-- [ ] Improved OCR output formatting using bounding-box data (detect headings, columns, paragraphs)
-- [ ] Preserve embedded images in OCR-converted documents
-- [ ] Multi-file (batch) upload with zipped output
-- [ ] Async conversion using a background thread/task queue to avoid HTTP timeouts on large files
-- [ ] Auto-cleanup of temporary upload/output files after download
-- [ ] Session-based conversion history (re-download without reconverting)
-- [ ] Health-check endpoint (`/health`) for Docker/Kubernetes liveness probes
-- [ ] Environment-based configuration via `.env` file
+- [x] Drag-and-drop upload zone for improved UX
+- [x] Page range selection (convert only selected pages)
+- [x] Improved OCR output formatting using bounding-box data (detect headings, columns, paragraphs)
+- [x] Preserve embedded images in OCR-converted documents
+- [x] Multi-file (batch) upload with zipped output
+- [x] Async conversion using a background thread/task queue to avoid HTTP timeouts on large files
+- [x] Auto-cleanup of temporary upload/output files after download
+- [x] Session-based conversion history (re-download without reconverting)
+- [x] Health-check endpoint (`/health`) for Docker/Kubernetes liveness probes
+- [x] Environment-based configuration via `.env` file
 
 ### Documentation
 - [x] Update README with full feature list and improvement roadmap
